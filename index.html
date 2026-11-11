@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Metadata Forger</title>
+
+    <!-- WAJIB paling atas: mengaktifkan SharedArrayBuffer di GitHub Pages -->
+    <script src="coi-serviceworker.js"></script>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- FFmpeg v0.11.6 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ffmpeg/0.11.6/ffmpeg.min.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col items-center justify-center p-4 font-sans">
+
+    <div class="max-w-2xl w-full bg-gray-800 p-6 rounded-2xl shadow-xl border border-gray-700">
+        <h1 class="text-2xl font-bold mb-2 text-center text-cyan-400">Video Metadata Forger</h1>
+        <p class="text-sm text-gray-400 mb-6 text-center">Metadata asli akan <b>otomatis dihapus</b> dan diganti dengan data di bawah ini.</p>
+
+        <div class="space-y-4">
+            <div class="bg-gray-750 p-4 rounded-lg border border-gray-600 border-dashed space-y-4">
+                <div>
+                    <label class="block text-sm font-semibold mb-2 text-cyan-300">1. Pilih File Video:</label>
+                    <input type="file" id="videoFile" accept="video/*" class="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-700 cursor-pointer">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold mb-1 text-cyan-300">Nama File Hasil (opsional):</label>
+                    <div class="flex items-center">
+                        <input type="text" id="outFileName" placeholder="Contoh: IMG_1234" class="w-full bg-gray-700 border border-gray-600 rounded-l-lg p-2 text-sm focus:outline-none focus:border-cyan-500">
+                        <span class="bg-gray-600 border border-gray-600 rounded-r-lg p-2 text-sm text-gray-300">.mp4</span>
+                    </div>
+                </div>
+            </div>
+
+            <label class="block text-sm font-semibold mt-4 text-cyan-300 border-b border-gray-600 pb-1">2. Isi Data Palsu (Kosongkan jika tidak ingin diisi):</label>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-medium mb-1 text-gray-300">Informasi Perangkat (Make/Model):</label>
+                    <input type="text" id="metaDevice" placeholder="Contoh: Apple iPhone 17 Pro Max" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-sm focus:outline-none focus:border-cyan-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium mb-1 text-gray-300">Waktu Perekaman:</label>
+                    <input type="datetime-local" id="metaTime" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-sm focus:outline-none focus:border-cyan-500 text-gray-300">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium mb-1 text-gray-300">Informasi Kamera (Lensa/Sensor):</label>
+                    <input type="text" id="metaCamera" placeholder="Contoh: Back Triple Camera 24mm f/1.78" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-sm focus:outline-none focus:border-cyan-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium mb-1 text-gray-300">Informasi Lokasi (GPS):</label>
+                    <input type="text" id="metaLocation" placeholder="Contoh: +40.7128-074.0060/" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-sm focus:outline-none focus:border-cyan-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium mb-1 text-gray-300">Informasi Teknis (Encoder/Software):</label>
+                    <input type="text" id="metaTech" placeholder="Contoh: Apple QuickTime" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-sm focus:outline-none focus:border-cyan-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium mb-1 text-gray-300">Informasi Khusus iPhone (iOS Version):</label>
+                    <input type="text" id="metaIphone" placeholder="Contoh: iOS 18.1" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-sm focus:outline-none focus:border-cyan-500">
+                </div>
+            </div>
+
+            <button id="processBtn" onclick="processVideo()" class="w-full mt-4 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed font-bold py-3 rounded-lg transition duration-200 shadow-lg text-white">
+                EKSEKUSI & UBAH VIDEO
+            </button>
+        </div>
+
+        <div id="statusBox" class="mt-6 hidden">
+            <p id="statusText" class="text-sm text-center text-yellow-400 mb-2">Memuat engine FFmpeg...</p>
+            <div class="w-full bg-gray-700 rounded-full h-2.5 overflow-hidden">
+                <div id="progressBar" class="bg-cyan-500 h-2.5 w-0 transition-all duration-300"></div>
+            </div>
+        </div>
+
+        <div id="downloadContainer" class="mt-4 text-center"></div>
+    </div>
+
+    <script>
+        const { createFFmpeg, fetchFile } = FFmpeg;
+        let ffmpeg = null;
+
+        function setStatus(text, pct) {
+            document.getElementById('statusBox').classList.remove('hidden');
+            document.getElementById('statusText').textContent = text;
+            if (pct !== undefined) {
+                document.getElementById('progressBar').style.width = pct + '%';
+            }
+        }
+
+        async function loadFFmpegEngine() {
+            if (ffmpeg && ffmpeg.isLoaded()) return;
+            setStatus('Memuat engine FFmpeg...', 5);
+            ffmpeg = createFFmpeg({
+                log: true,
+                corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+            });
+            ffmpeg.setProgress(({ ratio }) => {
+                const pct = Math.max(10, Math.min(100, Math.round(ratio * 100)));
+                setStatus('Memproses video... ' + pct + '%', pct);
+            });
+            await ffmpeg.load();
+        }
+
+        async function processVideo() {
+            const file = document.getElementById('videoFile').files[0];
+            if (!file) {
+                alert('Pilih file video dulu.');
+                return;
+            }
+
+            const btn = document.getElementById('processBtn');
+            const dl = document.getElementById('downloadContainer');
+            btn.disabled = true;
+            dl.innerHTML = '';
+
+            try {
+                await loadFFmpegEngine();
+
+                const device   = document.getElementById('metaDevice').value.trim();
+                const time     = document.getElementById('metaTime').value;
+                const camera   = document.getElementById('metaCamera').value.trim();
+                const location = document.getElementById('metaLocation').value.trim();
+                const tech     = document.getElementById('metaTech').value.trim();
+                const iphone   = document.getElementById('metaIphone').value.trim();
+                const outName  = (document.getElementById('outFileName').value.trim() || 'output') + '.mp4';
+
+                setStatus('Membaca file video...', 8);
+                ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(file));
+
+                // Hapus semua metadata asli, salin stream tanpa re-encode
+                const args = ['-i', 'input.mp4', '-map_metadata', '-1', '-c', 'copy'];
+                const addMeta = (k, v) => { if (v) args.push('-metadata', k + '=' + v); };
+
+                if (device) {
+                    addMeta('com.apple.quicktime.model', device);
+                    addMeta('com.apple.quicktime.make', device.split(' ')[0]);
+                }
+                if (time) {
+                    addMeta('creation_time', new Date(time).toISOString());
+                    addMeta('com.apple.quicktime.creationdate', new Date(time).toISOString());
+                }
+                if (camera)   addMeta('comment', camera);
+                if (location) {
+                    addMeta('location', location);
+                    addMeta('location-eng', location);
+                    addMeta('com.apple.quicktime.location.ISO6709', location);
+                }
+                if (tech)     addMeta('encoder', tech);
+                if (iphone)   addMeta('com.apple.quicktime.software', iphone);
+
+                args.push('-movflags', 'use_metadata_tags', '-fflags', '+bitexact', 'output.mp4');
+
+                setStatus('Memproses video...', 10);
+                await ffmpeg.run(...args);
+
+                const data = ffmpeg.FS('readFile', 'output.mp4');
+                const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = outName;
+                a.className = 'inline-block bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200';
+                a.textContent = 'Unduh ' + outName;
+                dl.appendChild(a);
+                a.click();
+
+                try { ffmpeg.FS('unlink', 'input.mp4'); } catch (e) {}
+                try { ffmpeg.FS('unlink', 'output.mp4'); } catch (e) {}
+
+                setStatus('Selesai! File sudah diunduh. Jika tidak otomatis, klik tombol hijau di bawah.', 100);
+            } catch (err) {
+                console.error(err);
+                setStatus('Error: ' + (err && err.message ? err.message : err), 0);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
